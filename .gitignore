@@ -1,0 +1,7 @@
+# Compiled binaries
+tpu_pjrt_test
+tpu_compute
+
+# Protobuf artifacts (generated from JAX, can be regenerated)
+*.pb
+*.mlir.bc
