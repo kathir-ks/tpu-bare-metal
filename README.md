@@ -2,6 +2,15 @@
 
 Direct TPU control via `libtpu.so` PJRT C API — no JAX or Python needed at runtime.
 
+> **New: a full pure-C++ ML stack.** On top of the C framework below, the repo now
+> includes a layered C++ interface for *programming, training, and running* neural
+> networks — including transformer LLMs — directly on TPU, with **no Python/JAX/TF at
+> runtime**. It builds StableHLO in C++, does reverse-mode autodiff, keeps weights
+> resident in HBM, trains data-parallel across all 4 chips, and trains+generates a
+> char-level GPT. See **[`README_CPP.md`](README_CPP.md)** and the docs:
+> [Report](docs/REPORT.md) · [Architecture](docs/ARCHITECTURE.md) · [API](docs/API.md).
+> Build & test it with `make cpp`.
+
 ## What This Does
 
 Loads Google's `libtpu.so` shared library at runtime using `dlopen`, accesses the **PJRT C API** function pointer table, and directly:

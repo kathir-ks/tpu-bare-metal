@@ -1,7 +1,32 @@
 # Compiled binaries
 tpu_pjrt_test
 tpu_compute
+ex01_roundtrip
+ex02_matmul
+ex03_spmd
+ex04_dev2dev
+ex05_async
+ex06_serialize
+ex07_shard
+ex08_topology
+
+# Framework build artifacts
+framework/*.o
+framework/libtpu_fw.a
+
+# Pure C++ stack build artifacts
+cpp/*.o
+cpp_gradcheck
+cpp_train_tiny
+cpp_gpt_smoke
+cpp_dp
+cpp_ckpt
+cpp_train_gpt
+cpp_train_gpt_dp
 
 # Protobuf artifacts (generated from JAX, can be regenerated)
 *.pb
 *.mlir.bc
+
+# Serialized executables (generated at runtime)
+*.exec

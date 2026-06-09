@@ -1,39 +1,67 @@
 #!/usr/bin/env python3
-"""Generate HLO protobuf files and compile options for tpu_compute.c"""
+"""Generate HLO protobuf files and compile options.
 
+IMPORTANT: Must run with the system python3 (3.10) that has JAX 0.6.2,
+NOT the py312 venv. The HLO unique-ID format changed in later JAX versions
+and is incompatible with the installed libtpu.so.
+
+  python3 gen_hlo.py          # output to current dir
+  TPU_DATA_DIR=~/tpu_direct python3 gen_hlo.py  # for legacy tpu_compute demo
+
+Framework examples (ex02_matmul etc.) read from $TPU_DATA_DIR or '.'.
+"""
+
+import os
 import jax
 import jax.numpy as jnp
 from jax._src.lib import xla_client
 
 
 def main():
+    out_dir = os.environ.get("TPU_DATA_DIR", ".")
+    os.makedirs(out_dir, exist_ok=True)
+
     x = jnp.ones((4, 4), dtype=jnp.float32)
     y = jnp.ones((4, 4), dtype=jnp.float32)
 
     # Matrix multiply: f(x, y) = x @ y
     lowered = jax.jit(lambda x, y: x @ y).lower(x, y)
     hlo = lowered.compiler_ir("hlo").as_serialized_hlo_module_proto()
-    with open("matmul.hlo.pb", "wb") as f:
+    p = os.path.join(out_dir, "matmul.hlo.pb")
+    with open(p, "wb") as f:
         f.write(hlo)
-    print(f"matmul.hlo.pb: {len(hlo)} bytes")
+    print(f"{p}: {len(hlo)} bytes")
 
     # Element-wise add: f(x) = x + x
     lowered2 = jax.jit(lambda x: x + x).lower(x)
     hlo2 = lowered2.compiler_ir("hlo").as_serialized_hlo_module_proto()
-    with open("add.hlo.pb", "wb") as f:
+    p = os.path.join(out_dir, "add.hlo.pb")
+    with open(p, "wb") as f:
         f.write(hlo2)
-    print(f"add.hlo.pb: {len(hlo2)} bytes")
+    print(f"{p}: {len(hlo2)} bytes")
 
     # Compile options (num_replicas=1, num_partitions=1)
     opts = xla_client.CompileOptions()
     opts.num_replicas = 1
     opts.num_partitions = 1
     opts_bytes = opts.SerializeAsString()
-    with open("compile_opts.pb", "wb") as f:
+    p = os.path.join(out_dir, "compile_opts.pb")
+    with open(p, "wb") as f:
         f.write(opts_bytes)
-    print(f"compile_opts.pb: {len(opts_bytes)} bytes")
+    print(f"{p}: {len(opts_bytes)} bytes")
 
-    # Save human-readable MLIR
+    # Compile options for 4-replica SPMD (ex03_spmd uses this)
+    ndev = jax.device_count()
+    opts4 = xla_client.CompileOptions()
+    opts4.num_replicas = ndev
+    opts4.num_partitions = 1
+    opts4_bytes = opts4.SerializeAsString()
+    p = os.path.join(out_dir, "compile_opts_n4.pb")
+    with open(p, "wb") as f:
+        f.write(opts4_bytes)
+    print(f"{p}: {len(opts4_bytes)} bytes  (num_replicas={ndev})")
+
+    # Save human-readable MLIR (always in the repo dir for reference)
     mlir = str(lowered.compiler_ir("stablehlo"))
     with open("matmul.mlir", "w") as f:
         f.write(mlir)
