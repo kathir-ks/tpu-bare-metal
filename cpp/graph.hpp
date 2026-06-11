@@ -41,6 +41,7 @@ enum class Op {
     Transpose, Reshape, Broadcast,        // shape ops
     ReduceSum, ReduceMax,                 // reductions (no keepdims)
     Select, Compare, Convert, Iota,       // misc
+    Gather, ScatterAdd,                   // row lookup + its adjoint
     StopGradient,
     AllReduce,                            // cross-replica sum (data parallelism)
 };
@@ -97,6 +98,12 @@ class Graph {
     // Number of replicas for cross-replica all_reduce (data parallelism). Set to
     // the device count when compiling an SPMD/replicated executable.
     int num_replicas = 1;
+
+    // Buffer donation: arg_index -> output_index. Emitted as
+    // `{tf.aliasing_output = K : i32}` on the function argument, telling XLA to
+    // reuse the input buffer for that output (in-place update). The donated
+    // input buffer is consumed by execution and must not be reused by the host.
+    std::map<int, int> arg_aliases;
 
     // ── leaves ──────────────────────────────────────────────────────────────
     Value input(const std::string& name, const Shape& shape, DType dt = DType::F32) {
@@ -237,6 +244,29 @@ class Graph {
         if (node(a.id).dtype == dt) return a;
         Node n; n.op = Op::Convert; n.shape = node(a.id).shape; n.dtype = dt;
         n.inputs = {a.id};
+        return {this, add(n)};
+    }
+
+    // ── row gather / scatter ─────────────────────────────────────────────────
+    // gather_rows(table[V,D...], ids) → ids.shape + [D...]: row lookup along
+    // table's leading axis (embedding). ids is any-shape integer tensor.
+    Value gather_rows(const Value& table, const Value& ids) {
+        const Shape& ts = node(table.id).shape;
+        if (ts.empty()) throw Error("gather_rows: table must be rank >= 1");
+        Shape out = node(ids.id).shape;
+        out.insert(out.end(), ts.begin() + 1, ts.end());
+        Node n; n.op = Op::Gather; n.shape = out; n.dtype = node(table.id).dtype;
+        n.inputs = {table.id, ids.id};
+        return {this, add(n)};
+    }
+
+    // scatter_add_rows(operand[V,D...], ids, updates[ids.shape, D...]):
+    // operand with updates[i] added into row ids[i] (duplicates accumulate).
+    // This is the VJP of gather_rows; exposed for completeness.
+    Value scatter_add_rows(const Value& operand, const Value& ids, const Value& updates) {
+        Node n; n.op = Op::ScatterAdd; n.shape = node(operand.id).shape;
+        n.dtype = node(operand.id).dtype;
+        n.inputs = {operand.id, ids.id, updates.id};
         return {this, add(n)};
     }
 

@@ -95,9 +95,18 @@ inline Value linear(TrainCtx& c, const Value& x, const std::string& name,
 }
 
 // integer ids[B,T] → embedding rows from table[vocab, dim] → [B,T,dim].
-// Implemented as one-hot @ table (avoids gather/scatter; grad is exact).
+// Implemented with stablehlo.gather; gradient is a scatter-add (exact, and
+// O(N·dim) instead of the one-hot matmul's O(N·vocab) memory).
 inline Value embedding(TrainCtx& c, const Value& ids, const std::string& name,
                        int64_t vocab, int64_t dim) {
+    Value table = c.param(name, {vocab, dim}, normal(0.02f));
+    return c.g.gather_rows(table, ids);
+}
+
+// Old one-hot @ table implementation (kept as a cross-check for the gather
+// path; identical math, exact gradient, but O(N·vocab) memory).
+inline Value embedding_onehot(TrainCtx& c, const Value& ids, const std::string& name,
+                              int64_t vocab, int64_t dim) {
     Graph& g = c.g;
     Value table = c.param(name, {vocab, dim}, normal(0.02f));
     Shape is = ids.shape();
@@ -257,6 +266,16 @@ class Trainer {
         for (auto& p : new_p_) outs.push_back(p);
         for (size_t i = 0; i < np; i++) { outs.push_back(new_m_[i]); outs.push_back(new_v_[i]); }
         out_count_ = outs.size();
+
+        // donate param/Adam-state inputs to their updated outputs so XLA
+        // updates them in place (no per-step realloc). step() already replaces
+        // the host-side Buffer handles with the outputs each step.
+        size_t obase = 1 + ndebug_;
+        for (size_t i = 0; i < np; i++) {
+            g_.arg_aliases[g_.node(pnode_ids_[i]).arg_index] = (int)(obase + i);
+            g_.arg_aliases[g_.node(m_ids_[i]).arg_index] = (int)(obase + np + 2 * i);
+            g_.arg_aliases[g_.node(v_ids_[i]).arg_index] = (int)(obase + np + 2 * i + 1);
+        }
 
         std::string mlir = g_.emit(outs);
         last_mlir_ = mlir;
@@ -481,7 +500,16 @@ class DataParallelTrainer {
         for (auto& p : new_p_) outs.push_back(p);
         for (size_t i = 0; i < np; i++) { outs.push_back(new_m_[i]); outs.push_back(new_v_[i]); }
 
-        exec_ = ctx_.compile_mlir_dp(g_.emit(outs));
+        // donate replicated param/Adam-state inputs to their updated outputs
+        // (outs: [loss, new_p..., new_m0,new_v0,...]).
+        for (size_t i = 0; i < np; i++) {
+            g_.arg_aliases[g_.node(pnode_ids_[i]).arg_index] = (int)(1 + i);
+            g_.arg_aliases[g_.node(m_ids_[i]).arg_index] = (int)(1 + np + 2 * i);
+            g_.arg_aliases[g_.node(v_ids_[i]).arg_index] = (int)(1 + np + 2 * i + 1);
+        }
+
+        last_mlir_ = g_.emit(outs);
+        exec_ = ctx_.compile_mlir_dp(last_mlir_);
         order_ = exec_.device_order(nd_);
         np_ = np;
 
@@ -553,6 +581,46 @@ class DataParallelTrainer {
         return &param_bufs_[0][it->second];  // replica 0 is on addressable device 0
     }
     Context& context() { return ctx_; }
+    const std::string& last_mlir() const { return last_mlir_; }
+
+    // ── checkpointing (same format as Trainer) ──────────────────────────────
+    // Params are identical across replicas: save replica 0, restore to all.
+    void save_checkpoint(const std::string& path) {
+        FILE* f = fopen(path.c_str(), "wb");
+        if (!f) throw Error("cannot open " + path + " for writing");
+        int32_t np = (int32_t)pdefs_.size();
+        fwrite(&np, sizeof(np), 1, f);
+        for (size_t i = 0; i < pdefs_.size(); i++) {
+            auto host = param_bufs_[0][i].to_host<float>();
+            int32_t nl = (int32_t)pdefs_[i].name.size();
+            int32_t ne = (int32_t)host.size();
+            fwrite(&nl, sizeof(nl), 1, f);
+            fwrite(pdefs_[i].name.data(), 1, nl, f);
+            fwrite(&ne, sizeof(ne), 1, f);
+            fwrite(host.data(), sizeof(float), ne, f);
+        }
+        fclose(f);
+    }
+
+    void load_checkpoint(const std::string& path) {
+        FILE* f = fopen(path.c_str(), "rb");
+        if (!f) throw Error("cannot open " + path + " for reading");
+        int32_t np = 0;
+        if (fread(&np, sizeof(np), 1, f) != 1) { fclose(f); throw Error("bad checkpoint"); }
+        for (int32_t kk = 0; kk < np; kk++) {
+            int32_t nl = 0; if (fread(&nl, sizeof(nl), 1, f) != 1) break;
+            std::string name(nl, '\0'); if (fread(&name[0], 1, nl, f) != (size_t)nl) break;
+            int32_t ne = 0; if (fread(&ne, sizeof(ne), 1, f) != 1) break;
+            std::vector<float> host(ne);
+            if (fread(host.data(), sizeof(float), ne, f) != (size_t)ne) break;
+            auto it = pindex_.find(name);
+            if (it == pindex_.end()) continue;
+            for (int r = 0; r < nd_; r++)
+                param_bufs_[r][it->second] =
+                    ctx_.upload_f32(host, pdefs_[it->second].shape, order_[r]);
+        }
+        fclose(f);
+    }
     int64_t param_count() const {
         int64_t n = 0; for (auto& d : pdefs_) n += num_elements(d.shape); return n;
     }
@@ -594,6 +662,7 @@ class DataParallelTrainer {
     int64_t t_ = 0;
     Executable exec_;
     std::vector<std::vector<Buffer>> param_bufs_, m_bufs_, v_bufs_;
+    std::string last_mlir_;
 };
 
 // ── Forward / inference ───────────────────────────────────────────────────────

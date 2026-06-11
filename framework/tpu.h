@@ -85,10 +85,15 @@ typedef void (*tpu_on_ready_fn)(const char* error_msg, void* user_arg);
 /* Init / teardown                                                             */
 /* ══════════════════════════════════════════════════════════════════════════ */
 
-/* Load libtpu.so, call Plugin_Initialize, create client, cache device list.
- * lib_path: path to libtpu.so; NULL → LIBTPU_PATH env var → built-in default.
+/* Load a PJRT plugin (libtpu.so, xla_cuda_plugin.so, a CPU plugin, …), call
+ * Plugin_Initialize, create the client, cache the device list.
+ * lib_path: plugin path; NULL → PJRT_PLUGIN_PATH env → LIBTPU_PATH env →
+ * built-in libtpu default.
  * Returns NULL on failure; call tpu_strerror(NULL) for the message. */
 tpu_ctx_t*  tpu_init(const char* lib_path);
+
+/* PJRT C API version reported by the loaded plugin (e.g. 0.69). */
+void        tpu_api_version(tpu_ctx_t* ctx, int* major, int* minor);
 
 /* Destroy the client and dlclose the library. Frees ctx. */
 void        tpu_destroy(tpu_ctx_t* ctx);

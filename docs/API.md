@@ -23,7 +23,8 @@ helpers in `tpu::nn`). Include what you need; everything is header-only except
 
 ### `class Context`
 ```cpp
-Context(const char* libtpu_path = nullptr);   // NULL → LIBTPU_PATH env or default
+Context(const char* plugin_path = nullptr);   // any PJRT plugin: NULL →
+        // PJRT_PLUGIN_PATH env → LIBTPU_PATH env → built-in libtpu default
 int  num_devices() const;
 int  num_addressable_devices() const;
 std::string topology() const;
@@ -89,6 +90,14 @@ Value convert(const Value& a, DType dt);
 **Reductions** — `reduce_sum / reduce_max / reduce_mean(a, axes, keepdims=false)`.
 
 **Linear algebra** — `dot(a, b)`: last two dims are the matrix, leading dims batch.
+
+**Gather / scatter**
+```cpp
+Value gather_rows(const Value& table, const Value& ids);  // table[V,D...], int ids
+        // → ids.shape + [D...]; row lookup (embedding). VJP is a scatter-add.
+Value scatter_add_rows(const Value& operand, const Value& ids, const Value& updates);
+        // operand with updates[i] accumulated into row ids[i] (duplicates add)
+```
 
 **Control / misc**
 ```cpp

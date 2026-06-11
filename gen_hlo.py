@@ -68,5 +68,24 @@ def main():
     print(f"matmul.mlir: {len(mlir)} bytes")
 
 
+def dump_opts(num_replicas, num_partitions, use_spmd, path):
+    """Oracle for the native C++ CompileOptions encoder (cpp/compile_opts.hpp):
+    dump a JAX-generated blob for an arbitrary config to byte/semantic-compare."""
+    opts = xla_client.CompileOptions()
+    opts.num_replicas = num_replicas
+    opts.num_partitions = num_partitions
+    if use_spmd:
+        opts.executable_build_options.use_spmd_partitioning = True
+    b = opts.SerializeAsString()
+    with open(path, "wb") as f:
+        f.write(b)
+    print(f"{path}: {len(b)} bytes (r={num_replicas} p={num_partitions} spmd={use_spmd})")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "--dump-opts":
+        # gen_hlo.py --dump-opts <replicas> <partitions> <spmd 0|1> <out.pb>
+        dump_opts(int(sys.argv[2]), int(sys.argv[3]), bool(int(sys.argv[4])), sys.argv[5])
+    else:
+        main()

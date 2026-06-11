@@ -156,6 +156,48 @@ std::string Graph::emit_node(int id, const std::string& ssa) const {
               << T(n.inputs[0]) << ", " << T(n.inputs[1]) << ") -> " << self_t;
             break;
         }
+        case Op::Gather: {
+            // rows of table[V,D...] selected by ids (scalar indices into dim 0):
+            // index_vector_dim == rank(ids) means each ids element is one index.
+            const Shape& ts = nodes_[n.inputs[0]].shape;
+            const Shape& is = nodes_[n.inputs[1]].shape;
+            int64_t ir = (int64_t)is.size();
+            std::vector<int64_t> offset_dims, slice_sizes = {1};
+            for (size_t i = 1; i < ts.size(); i++) {
+                offset_dims.push_back(ir + (int64_t)i - 1);
+                slice_sizes.push_back(ts[i]);
+            }
+            o << "  " << ssa << " = \"stablehlo.gather\"(" << NM(n.inputs[0]) << ", "
+              << NM(n.inputs[1]) << ") {dimension_numbers = #stablehlo.gather<"
+              << "offset_dims = [" << join_i64(offset_dims) << "], "
+              << "collapsed_slice_dims = [0], start_index_map = [0], "
+              << "index_vector_dim = " << ir << ">, "
+              << "slice_sizes = array<i64: " << join_i64(slice_sizes) << ">, "
+              << "indices_are_sorted = false} : ("
+              << T(n.inputs[0]) << ", " << T(n.inputs[1]) << ") -> " << self_t;
+            break;
+        }
+        case Op::ScatterAdd: {
+            const Shape& ts = nodes_[n.inputs[0]].shape;
+            const Shape& is = nodes_[n.inputs[1]].shape;
+            int64_t ir = (int64_t)is.size();
+            std::vector<int64_t> uwd;  // update_window_dims: trailing dims of updates
+            for (size_t i = 1; i < ts.size(); i++) uwd.push_back(ir + (int64_t)i - 1);
+            std::string et = mlir_dtype(n.dtype);
+            o << "  " << ssa << " = \"stablehlo.scatter\"(" << NM(n.inputs[0]) << ", "
+              << NM(n.inputs[1]) << ", " << NM(n.inputs[2]) << ") ({\n"
+              << "  ^bb0(%sc_a: tensor<" << et << ">, %sc_b: tensor<" << et << ">):\n"
+              << "    %sc_s = stablehlo.add %sc_a, %sc_b : tensor<" << et << ">\n"
+              << "    stablehlo.return %sc_s : tensor<" << et << ">\n"
+              << "  }) {scatter_dimension_numbers = #stablehlo.scatter<"
+              << "update_window_dims = [" << join_i64(uwd) << "], "
+              << "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0], "
+              << "index_vector_dim = " << ir << ">, "
+              << "indices_are_sorted = false, unique_indices = false} : ("
+              << T(n.inputs[0]) << ", " << T(n.inputs[1]) << ", " << T(n.inputs[2])
+              << ") -> " << self_t;
+            break;
+        }
         case Op::ReduceSum:
         case Op::ReduceMax: {
             const char* rop = (n.op == Op::ReduceSum) ? "add" : "maximum";
@@ -179,6 +221,9 @@ std::string Graph::emit(const std::vector<Value>& outputs) const {
         const Node& a = nodes_[args_[i]];
         if (i) o << ", ";
         o << "%arg" << a.arg_index << ": " << type_str(a.shape, a.dtype);
+        auto al = arg_aliases.find(a.arg_index);
+        if (al != arg_aliases.end())
+            o << " {tf.aliasing_output = " << al->second << " : i32}";
     }
     o << ") -> (";
     for (size_t i = 0; i < outputs.size(); i++) {
@@ -330,8 +375,9 @@ std::vector<Value> Graph::grad(const Value& loss, const std::vector<Value>& para
                 accum(n.inputs[0], reshape(G, node(n.inputs[0]).shape));
                 break;
             case Op::Broadcast: {
-                const Shape& os = node(n.inputs[0]).shape;  // operand
-                const Shape& ts = n.shape;                  // target
+                Shape os = node(n.inputs[0]).shape;  // copy: reduce_sum below
+                                                     // reallocates nodes_
+                const Shape& ts = n.shape;           // target (n is a copy)
                 const std::vector<int64_t>& bd = n.ints;
                 std::vector<int64_t> sum_axes;
                 for (int64_t a = 0; a < (int64_t)ts.size(); a++) {
@@ -368,6 +414,19 @@ std::vector<Value> Graph::grad(const Value& loss, const std::vector<Value>& para
             }
             case Op::Convert:
                 accum(n.inputs[0], convert(G, node(n.inputs[0]).dtype));
+                break;
+            case Op::Gather: {
+                // d_table = scatter_add(zeros_like(table), ids, G); ids: no grad.
+                Shape ts = node(n.inputs[0]).shape;   // copy: constant() below
+                DType tdt = node(n.inputs[0]).dtype;  // reallocates nodes_
+                Value zeros = constant(0.0, ts, tdt);
+                accum(n.inputs[0], scatter_add_rows(zeros, V(n.inputs[1]), G));
+                break;
+            }
+            case Op::ScatterAdd:
+                // y = operand with updates added at ids
+                accum(n.inputs[0], G);
+                accum(n.inputs[2], gather_rows(G, V(n.inputs[1])));
                 break;
         }
     }

@@ -31,6 +31,8 @@ struct tpu_ctx_t {
     size_t        num_all;
     PJRT_Device** addr_devices;
     size_t        num_addr;
+    int           api_major;       /* plugin's PJRT C API version */
+    int           api_minor;
     char          errmsg[512];
 };
 
@@ -150,6 +152,9 @@ const char* tpu_dtype_name(tpu_dtype_t dtype)
 
 tpu_ctx_t* tpu_init(const char* lib_path)
 {
+    /* Any PJRT plugin works (libtpu.so, xla_cuda_plugin.so, CPU plugin, …):
+     * explicit path → PJRT_PLUGIN_PATH → LIBTPU_PATH (legacy) → default. */
+    if (!lib_path) lib_path = getenv("PJRT_PLUGIN_PATH");
     if (!lib_path) lib_path = getenv("LIBTPU_PATH");
     if (!lib_path) lib_path = LIBTPU_DEFAULT_PATH;
 
@@ -169,6 +174,22 @@ tpu_ctx_t* tpu_init(const char* lib_path)
 
     void* api_ptr = get_api();
     void** fn     = (void**)((char*)api_ptr + 40);
+
+    /* Header: struct_size(8) ext(8) version{ss(8) ext(8) major(4) minor(4)}.
+     * The function table is append-only across API versions, so existing
+     * indices stay valid — but the plugin's table must at least cover the
+     * highest index we call. */
+    size_t api_struct_size = *(size_t*)api_ptr;
+    int api_major = *(int*)((char*)api_ptr + 32);
+    int api_minor = *(int*)((char*)api_ptr + 36);
+    size_t need = 40 + 8 * (FN_BUF_TOHOST + 1);
+    if (api_struct_size < need) {
+        snprintf(g_init_errmsg, sizeof(g_init_errmsg),
+                 "%s: PJRT API v%d.%d table too small (%zu bytes, need %zu) — plugin too old",
+                 lib_path, api_major, api_minor, api_struct_size, need);
+        dlclose(handle);
+        return NULL;
+    }
 
     /* Plugin_Initialize */
     PJRT_Plugin_Initialize_Args pi;
@@ -243,7 +264,15 @@ tpu_ctx_t* tpu_init(const char* lib_path)
     ctx->num_all      = dv.num_devices;
     ctx->addr_devices = (PJRT_Device**)adv.addressable_devices;
     ctx->num_addr     = adv.num_addressable_devices;
+    ctx->api_major    = api_major;
+    ctx->api_minor    = api_minor;
     return ctx;
+}
+
+void tpu_api_version(tpu_ctx_t* ctx, int* major, int* minor)
+{
+    if (major) *major = ctx ? ctx->api_major : 0;
+    if (minor) *minor = ctx ? ctx->api_minor : 0;
 }
 
 void tpu_destroy(tpu_ctx_t* ctx)

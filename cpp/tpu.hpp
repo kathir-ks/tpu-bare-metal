@@ -22,8 +22,7 @@ extern "C" {
 #include "tpu.h"
 }
 
-#include "default_opts.h"     // k_default_compile_opts (1 replica)
-#include "default_opts_n4.h"  // k_opts_n4 (4 replicas, for data parallelism)
+#include "compile_opts.hpp"   // native CompileOptionsProto construction
 
 namespace tpu {
 
@@ -257,22 +256,29 @@ class Context {
     }
 
     // ── Compile StableHLO text (the "mlir" path) ────────────────────────────
-    // With opts==nullptr, uses the embedded default options (num_replicas=1,
+    // With opts==nullptr, builds default options natively (num_replicas=1,
     // num_partitions=1) — PJRT rejects an empty CompileOptions as (0,0).
     Executable compile_mlir(const std::string& mlir,
                             const void* opts = nullptr, size_t opts_sz = 0) {
-        if (!opts) { opts = k_default_compile_opts; opts_sz = k_default_compile_opts_len; }
+        std::string def;
+        if (!opts) {
+            def = make_compile_options(1);
+            opts = def.data(); opts_sz = def.size();
+        }
         tpu_exec_t* e = tpu_compile_buf(ctx_, mlir.data(), mlir.size(), "mlir",
                                         opts, opts_sz);
         if (!e) throw Error("compile_mlir failed: " + last_error());
         return Executable(e);
     }
 
-    // Compile a replicated (data-parallel) StableHLO program: 4 replicas, one
-    // per addressable device. Pair with Graph::num_replicas and all_reduce_sum.
-    Executable compile_mlir_dp(const std::string& mlir) {
+    // Compile a replicated (data-parallel) StableHLO program with one replica
+    // per addressable device (or an explicit count). Pair with
+    // Graph::num_replicas and all_reduce_sum.
+    Executable compile_mlir_dp(const std::string& mlir, int num_replicas = 0) {
+        if (num_replicas <= 0) num_replicas = num_addressable_devices();
+        std::string opts = make_compile_options(num_replicas);
         tpu_exec_t* e = tpu_compile_buf(ctx_, mlir.data(), mlir.size(), "mlir",
-                                        k_opts_n4, k_opts_n4_len);
+                                        opts.data(), opts.size());
         if (!e) throw Error("compile_mlir_dp failed: " + last_error());
         return Executable(e);
     }
