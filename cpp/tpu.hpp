@@ -113,9 +113,20 @@ class Buffer {
     }
 
     // Copy device buffer to a host vector of T.
+    //
+    // Size the host vector by the LOGICAL element count (product of dims), NOT
+    // size_bytes(): size_bytes() reports the on-device tiled/padded byte size, so
+    // for a tensor whose minor dim is not 128-aligned (e.g. a 2x2) it over-counts
+    // (2x2 -> 2x128 = 256 floats).  tpu_download pins a dense row-major host
+    // layout and delivers exactly the logical elements, so sizing by the logical
+    // count returns them unpadded.  Aligned tensors are unaffected (padded ==
+    // logical), so existing callers see identical results.
     template <typename T>
     std::vector<T> to_host() const {
-        std::vector<T> out(size_bytes() / sizeof(T));
+        Shape s = shape();
+        size_t n = 1;
+        for (int64_t d : s) n *= (size_t)d;
+        std::vector<T> out(n);
         check(tpu_download(buf_, out.data(), out.size() * sizeof(T)) == 0,
               "tpu_download failed");
         return out;

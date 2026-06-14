@@ -27,6 +27,14 @@ cpp_gather
 cpp_plugin_probe
 cpp_train_gpt
 cpp_train_gpt_dp
+cpp_eager
+cpp_autograd
+cpp_jit
+cpp_module
+cpp_optim
+cpp_jit_train
+cpp_gpt_module
+cpp_train_mlp
 bench_gpt
 bench_matmul
 bench/data/

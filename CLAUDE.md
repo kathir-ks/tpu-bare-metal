@@ -11,7 +11,7 @@ A **pure C/C++ ML stack on bare-metal TPU** — no Python, JAX, or TensorFlow at
 
 Tested on TPU v4-8 (4 chips, 2×2 topology), PJRT API v0.69, TFRT runtime.
 
-Docs: `docs/REPORT.md` (engineering report), `docs/ARCHITECTURE.md` (layer-by-layer), `docs/API.md` (C++ API), `docs/compile_options_format.md` (CompileOptionsProto wire format), `README_CPP.md`.
+Docs: `docs/REPORT.md` (engineering report), `docs/ARCHITECTURE.md` (layer-by-layer), `docs/API.md` (C++ API), `docs/EAGER_JIT_FRONTEND.md` (eager/jit Tensor frontend design & development record), `docs/compile_options_format.md` (CompileOptionsProto wire format), `README_CPP.md`.
 
 ## Goal / direction
 

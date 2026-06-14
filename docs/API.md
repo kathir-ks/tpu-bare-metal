@@ -4,11 +4,23 @@ Public surface of the `cpp/` headers. All types live in namespace `tpu` (with NN
 helpers in `tpu::nn`). Include what you need; everything is header-only except
 `graph.cpp`.
 
+There are two layers, both live:
+- the **graph builder** (`graph.hpp` / `nn.hpp` / `gpt.hpp`) — compile-only, define-then-run;
+- the **eager/jit Tensor frontend** (`tensor.hpp` / `eager.hpp` / `autograd.hpp` / `jit.hpp` / `module.hpp` / `optim.hpp`) — define-by-run with `jit` on demand (documented at the end of this file).
+
 ```cpp
+// graph builder
 #include "tpu.hpp"     // Context, Buffer, Executable, DType, Shape
 #include "graph.hpp"   // Graph, Value, Op
 #include "nn.hpp"      // layers, AdamCfg, Trainer, DataParallelTrainer, Forward
 #include "gpt.hpp"     // GPTConfig, gpt_logits, gpt_loss
+
+// eager/jit Tensor frontend
+#include "tensor.hpp"  // Tensor
+#include "autograd.hpp"// TapeScope, backward, value_and_grad
+#include "jit.hpp"     // jit, value_and_grad_jit
+#include "module.hpp"  // Module, Linear, MLP, Embedding, RMSNorm, Attention, Block, GPT
+#include "optim.hpp"   // SGD, Adam, JitAdamStep
 ```
 
 ---
@@ -204,3 +216,134 @@ tr.save_checkpoint("gpt.ckpt");
 ```
 
 See `examples/cpp/train_gpt.cpp` for a complete trainer + sampler.
+
+---
+
+# Eager / JIT Tensor frontend
+
+A PyTorch-shaped, mutable, object-oriented layer on top of the graph builder:
+define-by-run eager execution, a tape autograd, a `jit` transform that compiles
+on demand, plus `Module` and `Optimizer`. One IR, two execution policies — eager
+and jit build the *same* graph nodes and so produce bit-identical numerics
+(validated on-device: `cpp_jit_train`, `cpp_gpt_module`).
+
+```cpp
+#include "tensor.hpp"    // Tensor (Concrete | Traced handle)
+#include "eager.hpp"     // op free-functions, leaf ctors, global_context()
+#include "autograd.hpp"  // TapeScope, Tensor::backward, value_and_grad
+#include "jit.hpp"       // jit, value_and_grad_jit
+#include "module.hpp"    // Module, Linear, MLP, Embedding, RMSNorm, Attention, Block, GPT
+#include "optim.hpp"     // SGD, Adam, JitAdamStep
+```
+
+## `tensor.hpp` — `class Tensor`
+
+A reference-counted handle over a `TensorImpl` that is either **Concrete** (owns a
+device `Buffer`) or **Traced** (a `(Graph*, node)` pair inside a live jit trace).
+Copy is cheap (aliases the same Impl); the last handle frees the buffer. Bindings
+are mutable (SSA underneath) — assignment rebinds, it does not mutate storage.
+
+- `shape() / dtype() / device() / numel() / rank()`
+- `requires_grad() / requires_grad_(bool)` — mark a leaf as a parameter.
+- `grad()` — accumulated gradient (null `Tensor` until `backward()`); `set_grad`, `accumulate_grad`.
+- `backward()` — scalar-rooted reverse pass (needs `autograd.hpp` + an active `TapeScope`).
+- `to_host()` — download to `std::vector<float>` (throws if Traced — reads inside jit are a graph break).
+- `is_concrete() / is_traced()`, `raw_buffer() / shared_buffer() / rebind_buffer()` (optimizer-facing).
+- Operators `+ - * /` (tensor and scalar), routed through the eager dispatch.
+
+## `eager.hpp` — leaves, ops, dispatch
+
+Leaf constructors: `from_host(vec, shape)`, `from_host_s32`, `full / zeros / ones`,
+`randn`. Ops (free functions, each works in eager **and** jit):
+`add, sub, mul, div_op, maximum, minimum`, `neg, exp_op, log_op, sqrt_op,
+rsqrt_op, tanh_op, abs_op, logistic`, `relu, gelu`, `matmul` (batched),
+`reshape, transpose, transpose_perm`, `reduce_sum, reduce_max, reduce_mean`,
+`stop_gradient`, `gather_rows`, `softmax`. `set_dot_precision("HIGHEST"|"DEFAULT")`
+sets the global dot precision (default `HIGHEST` for correctness).
+
+Eager dispatch lowers one op to a 1-op executable and caches it, keyed by
+`(op, input shapes/dtypes, attrs, num_replicas, precision, output shape)`; the
+second identical op is a pure execute. `global_context()` is the single lazy
+process-wide PJRT `Context`.
+
+## `autograd.hpp` — tape
+
+```cpp
+TapeScope scope;                 // install a fresh tape
+Tensor loss = model.forward(x);  // ops record onto the tape when grad is needed
+loss.backward();                 // fills param .grad; tape resets (PyTorch semantics)
+```
+
+- `NoGrad ng;` — RAII scope; ops execute but do not tape.
+- `value_and_grad(fn, params)` / `grad(fn, params)` — functional interface; `fn` is
+  `() -> Tensor` (scalar), `params` is `std::vector<Tensor*>`.
+- The tape reuses `Graph::grad`'s VJP rules and a memoizing evaluator that seeds
+  from retained forward activations.
+
+## `jit.hpp` — compile on demand
+
+```cpp
+auto f = jit(std::function<Tensor(Tensor)>([&](Tensor x){ return loss_of(x); }),
+             /*num_replicas*/1, /*precision*/"HIGHEST");
+Tensor l = f(x);   // first call traces+compiles; later calls execute the cached exe
+```
+
+- **Auto-lift**: Concrete tensors touched during a trace (Module params, captured
+  constants) are lifted into the graph as Inputs by **Impl identity** — shared
+  (weight-tied) tensors lift once. Buffers are re-read every call; the capture set
+  must be stable across calls of the same input signature.
+- `value_and_grad_jit(fn, params)` — compiles **one** executable returning
+  `[loss, grad_0, grad_1, …]` (fused forward+backward); grads come back in
+  `params` order. Exact-matches eager `value_and_grad` (`cpp_jit_train` test).
+
+## `module.hpp` — layers
+
+`Module` base: `register_parameter`, `register_module`, `parameters()` (returns
+`std::vector<Tensor*>`, **de-duplicated by Impl identity** so a tied weight is
+returned once), `param_count()`.
+
+Layers: `Linear`, `ReLU`, `GELU`, `Sequential`, `MLP`, and the transformer set
+`Embedding` (gather), `RMSNorm`, `Attention` (causal MHA), `Block` (pre-norm),
+plus `cross_entropy(logits[N,V], targets[N])` and `softmax`. `GPT` (with
+`GPTModuleConfig`) composes them: token+positional embeddings → `n_layer` blocks →
+final RMSNorm → untied head; `GPT::logits(ids)` and `GPT::loss(ids, targets)`.
+
+## `optim.hpp` — optimizers
+
+- `SGD(params, lr, momentum=0)`, `Adam(params, lr, AdamCfg{})` — eager `step()`
+  rebinds param buffers; `zero_grad()` clears `.grad`. State `m`/`v` held as Tensors.
+- `JitAdamStep(fn, params, lr, AdamCfg{})` — the **fully fused** training step:
+  forward + backward + Adam compiled into one XLA executable with param/`m`/`v`
+  donation-aliased for in-place HBM update. `step({x,y})` returns the scalar loss
+  and updates params in place. lr/bias-correction are scalar inputs, so the step
+  count never forces a recompile.
+
+## eager vs jit — performance contract
+
+| | eager | jit (`JittedCallable` / `value_and_grad_jit` / `JitAdamStep`) |
+|---|---|---|
+| Lowering | one executable **per op**, cached | one executable for the **whole** traced region |
+| Activations | round-trip HBM↔kernel per op | stay in HBM across the fused program |
+| Optimizer step | per-op Adam arithmetic, buffer rebinds | forward+backward+Adam in one exe, params donated in place |
+| Use it for | debugging, dynamic control flow, REPL-style work | the training loop / any hot path (this is the benchmarked path) |
+| Numerics | — | **identical** to eager at the same precision (validated: exact loss/grad parity) |
+
+Rule of thumb: prototype eagerly, then wrap the step in `JitAdamStep` (or the
+forward in `jit`) for throughput. Because both paths build the same IR, switching
+is loss-preserving — there is no "port to graph mode" step.
+
+```cpp
+// Fused training loop (the fast path)
+MLP model(IN, HID, OUT, true, "gelu", &rng);
+JitAdamStep step([&](std::vector<Tensor> b){
+    Tensor d = sub(model.forward(b[0]), b[1]);
+    return reduce_sum(mul(d, d), {0,1});
+}, model.parameters(), /*lr*/1e-2);
+
+for (int i = 0; i < steps; ++i)
+    float loss = step({xb, yb}).to_host()[0];   // params updated in place
+```
+
+See `examples/cpp/train_mlp.cpp` (eager train + eager==jit parity) and the tests
+`cpp_jit_train` (fused fwd/bwd + JitAdamStep) and `cpp_gpt_module` (GPT trains via
+the fused step) for complete, on-device-validated examples.

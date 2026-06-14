@@ -34,13 +34,14 @@ CXX        = g++
 CXXFLAGS   = -std=c++17 -O2 -Wall -I./framework -I./cpp
 CPP_OBJ    = cpp/graph.o
 CPP_HDRS   = cpp/tpu.hpp cpp/graph.hpp cpp/nn.hpp cpp/gpt.hpp cpp/default_opts.h \
-             cpp/proto_writer.hpp cpp/compile_opts.hpp cpp/debug_opts_blob.h
+             cpp/proto_writer.hpp cpp/compile_opts.hpp cpp/debug_opts_blob.h \
+             cpp/tensor.hpp cpp/eager.hpp cpp/autograd.hpp cpp/jit.hpp cpp/module.hpp cpp/optim.hpp
 
 cpp/graph.o: cpp/graph.cpp cpp/graph.hpp cpp/tpu.hpp cpp/default_opts.h
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-CPP_TESTS    = cpp_gradcheck cpp_train_tiny cpp_gpt_smoke cpp_dp cpp_ckpt cpp_compile_opts cpp_donation cpp_gather cpp_plugin_probe
-CPP_EXAMPLES = cpp_train_gpt cpp_train_gpt_dp
+CPP_TESTS    = cpp_gradcheck cpp_train_tiny cpp_gpt_smoke cpp_dp cpp_ckpt cpp_compile_opts cpp_donation cpp_gather cpp_plugin_probe cpp_eager cpp_autograd cpp_jit cpp_module cpp_optim cpp_jit_train cpp_gpt_module
+CPP_EXAMPLES = cpp_train_gpt cpp_train_gpt_dp cpp_train_mlp
 
 cpp_gradcheck:  tests/cpp/test_gradcheck.cpp  $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
@@ -60,9 +61,26 @@ cpp_gather:     tests/cpp/test_gather.cpp       $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 cpp_plugin_probe: tests/cpp/test_plugin_probe.cpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_eager:      tests/cpp/test_eager.cpp       $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+# ── Wave-B frontend layers (added to CPP_TESTS at integration once all exist) ──
+cpp_autograd:   tests/cpp/test_autograd_eager.cpp cpp/autograd.hpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_jit:        tests/cpp/test_jit.cpp         cpp/jit.hpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_module:     tests/cpp/test_module.cpp      cpp/module.hpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_optim:      tests/cpp/test_optim.cpp       cpp/optim.hpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_jit_train:  tests/cpp/test_jit_train.cpp   cpp/optim.hpp cpp/jit.hpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_gpt_module: tests/cpp/test_gpt_module.cpp  cpp/module.hpp cpp/optim.hpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 cpp_train_gpt:  examples/cpp/train_gpt.cpp     $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 cpp_train_gpt_dp: examples/cpp/train_gpt_dp.cpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_train_mlp:  examples/cpp/train_mlp.cpp     $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 
 cpp: $(CPP_TESTS) $(CPP_EXAMPLES)
@@ -94,6 +112,6 @@ examples: $(EXAMPLES)
 clean:
 	rm -f tpu_pjrt_test tpu_compute $(EXAMPLES)
 	rm -f framework/*.o $(FWK_LIB)
-	rm -f cpp/*.o $(CPP_TESTS) $(CPP_EXAMPLES)
+	rm -f cpp/*.o $(CPP_TESTS) $(CPP_EXAMPLES) cpp_eager
 
 .PHONY: all lib examples cpp hlo clean
