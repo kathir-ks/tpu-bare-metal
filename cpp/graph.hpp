@@ -184,6 +184,11 @@ class Graph {
 
     // ── shape ops ────────────────────────────────────────────────────────────
     Value reshape(const Value& a, const Shape& s) {
+        const Shape& in = node(a.id).shape;
+        if (num_elements(s) != num_elements(in))
+            throw Error("reshape: element count mismatch (" +
+                        std::to_string(num_elements(in)) + " -> " +
+                        std::to_string(num_elements(s)) + ")");
         Node n; n.op = Op::Reshape; n.shape = s; n.dtype = node(a.id).dtype;
         n.inputs = {a.id};
         return {this, add(n)};
@@ -191,6 +196,18 @@ class Graph {
 
     Value transpose(const Value& a, const std::vector<int64_t>& perm) {
         const Shape& in = node(a.id).shape;
+        int64_t r = (int64_t)in.size();
+        if ((int64_t)perm.size() != r)
+            throw Error("transpose: perm length " + std::to_string(perm.size()) +
+                        " != input rank " + std::to_string(r));
+        std::vector<bool> seen(r, false);
+        for (int64_t p : perm) {
+            if (p < 0 || p >= r)
+                throw Error("transpose: perm axis " + std::to_string(p) +
+                            " out of range for rank " + std::to_string(r));
+            if (seen[p]) throw Error("transpose: perm axis " + std::to_string(p) + " repeated");
+            seen[p] = true;
+        }
         Shape s(perm.size());
         for (size_t i = 0; i < perm.size(); i++) s[i] = in[perm[i]];
         Node n; n.op = Op::Transpose; n.shape = s; n.dtype = node(a.id).dtype;
@@ -314,8 +331,14 @@ class Graph {
     Value reduce(Op op, const Value& a, std::vector<int64_t> axes, bool keepdims) {
         Shape in = node(a.id).shape;   // copy: scalar()/add() below reallocate nodes_
         DType in_dt = node(a.id).dtype;
-        // normalize negative axes & sort
-        for (auto& ax : axes) if (ax < 0) ax += (int64_t)in.size();
+        int64_t rank = (int64_t)in.size();
+        // normalize negative axes, bounds-check, & sort
+        for (auto& ax : axes) {
+            if (ax < 0) ax += rank;
+            if (ax < 0 || ax >= rank)
+                throw Error("reduce: axis " + std::to_string(ax) +
+                            " out of range for rank " + std::to_string(rank));
+        }
         std::sort(axes.begin(), axes.end());
         Shape reduced;
         std::vector<bool> drop(in.size(), false);
