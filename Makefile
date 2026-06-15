@@ -41,7 +41,7 @@ cpp/graph.o: cpp/graph.cpp cpp/graph.hpp cpp/tpu.hpp cpp/default_opts.h
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 CPP_TESTS    = cpp_gradcheck cpp_train_tiny cpp_gpt_smoke cpp_dp cpp_ckpt cpp_compile_opts cpp_donation cpp_gather cpp_plugin_probe cpp_eager cpp_autograd cpp_jit cpp_module cpp_optim cpp_jit_train cpp_gpt_module
-CPP_EXAMPLES = cpp_train_gpt cpp_train_gpt_dp cpp_train_mlp
+CPP_EXAMPLES = cpp_train_gpt cpp_train_gpt_dp cpp_train_mlp cpp_train_gpt_frontend
 
 cpp_gradcheck:  tests/cpp/test_gradcheck.cpp  $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
@@ -81,6 +81,8 @@ cpp_train_gpt:  examples/cpp/train_gpt.cpp     $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 cpp_train_gpt_dp: examples/cpp/train_gpt_dp.cpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 cpp_train_mlp:  examples/cpp/train_mlp.cpp     $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_train_gpt_frontend: examples/cpp/train_gpt_frontend.cpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 
 cpp: $(CPP_TESTS) $(CPP_EXAMPLES)
