@@ -15,6 +15,7 @@
 #include "layer_table_block.hpp"
 #include "layer_table_ce.hpp"
 #include "layer_table_gpt.hpp"
+#include "layer_table_stability.hpp"
 
 namespace tpu {
 
@@ -28,6 +29,7 @@ inline const LayerMap& layer_table() {
         register_block(m);
         register_ce(m);
         register_gpt(m);
+        register_stability(m);
         return m;
     }();
     return T;

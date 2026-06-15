@@ -36,6 +36,7 @@ LAYER_MODULES = [
     "layers_block",      # transformer block (composite)
     "layers_ce",         # cross_entropy (scalar out, int targets)
     "layers_gpt",        # composite GPT (whole model)
+    "layers_stability",  # extreme-magnitude regimes (overflow/eps protection)
 ]
 
 
@@ -57,7 +58,9 @@ def _draw_input(key, spec_in):
     name, shape = spec_in["name"], spec_in["shape"]
     if spec_in.get("int", False):
         return randint(key, name, tuple(shape), high=spec_in["high"])
-    return randf(key, name, *shape)
+    # optional `scale` multiplies the standard-normal draw to reach extreme
+    # magnitudes (numerical-stability regimes); default 1.0.
+    return (randf(key, name, *shape) * spec_in.get("scale", 1.0)).astype("float32")
 
 
 def main():
@@ -102,7 +105,7 @@ def main():
         w.add("out", out)
         for nm in diff_names:
             w.add("grad_" + nm, grad_by_name[nm])
-        w.add_scalar("__tol_highest__", TOL_HI)
+        w.add_scalar("__tol_highest__", spec.get("fwd_tol", TOL_HI))
         w.add_scalar("__tol_default__", TOL_DF)
         # Gradient tolerance: atomic layers earn the tight forward bound; composite
         # layers (block/gpt) accumulate TPU-HIGHEST-vs-f32 rounding (~1e-6 relative
