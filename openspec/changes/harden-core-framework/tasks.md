@@ -28,7 +28,7 @@
 - [x] 4.3 Add edge-shape cases: size-1 dims and non-128-aligned minor dims (confirm no host-download scrambling) — abs/add/dot on [2,130], [3,65], size-1 dims all green
 - [x] 4.4 Add VJP-vs-oracle-grad comparison (second orthogonal proof) for every op — `cpp_oracle_grad`; 85/85 on TPU at HIGHEST
 - [x] 4.5 Independent verifier agent confirms the strict gate — workflow verifiers (host-side) + on-device integration 85/85 grads green
-- [ ] 4.1b (follow-up) Add standalone central-finite-difference per-op gradient check as an independent third proof (oracle-free)
+- [x] 4.1b Add standalone central-finite-difference per-op gradient check as an independent third proof (oracle-free) — `cpp_fd_grad`: analytic VJP vs finite differences of the C++ forward, 74/74 on TPU (10 non-smooth/non-diff skipped), in `make verify`
 
 ## 5. Phase 2c — Layer & model conformance (parallel pipeline, mixed)
 
