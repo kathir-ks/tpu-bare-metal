@@ -33,7 +33,7 @@
 ## 5. Phase 2c — Layer & model conformance (parallel pipeline, mixed)
 
 - [x] 5.1 Build `cpp_oracle_layers`: per-layer forward + backward parity vs oracle within declared tolerance — 8 layers (gelu/linear/rmsnorm/embedding/softmax/cross_entropy/attention/block), 35/35 checks green on TPU
-- [ ] 5.2 Add composite GPT loss + param-gradient parity vs oracle — deferred (block+embedding+cross_entropy already cover all GPT components; full end-to-end GPT is the remaining stretch)
+- [x] 5.2 Add composite GPT loss + param-gradient parity vs oracle — `layers_gpt.py` + `layer_table_gpt.hpp`; tiny 1-layer GPT (gpt.hpp gpt_loss) forward + all 14 param grads vs JAX oracle, 15/15 green on TPU (measured grads ~8e-5, composite 1e-2 envelope)
 - [~] 5.3 Harden numerical stability (softmax/cross_entropy/rmsnorm/logsumexp in large-magnitude and near-zero regimes); fix any instability found — softmax/CE/rmsnorm verified at default magnitudes; large/near-zero regime cases still to add
 - [x] 5.4 Independent verifier agent confirms the strict gate — Opus verifiers audited each layer formula line-by-line vs nn.hpp (mask/scale/eps/axes/param-names); on-device integration 35/35 green
 - NOTE 5.x finding: composite `block` gradients accumulate TPU-HIGHEST-vs-f32 rounding through a deep backward; fixed with a documented depth-aware grad tolerance (1e-2, the project's gradcheck envelope) while forward stays tight (~2e-4). Atomic layers keep 2e-3.
