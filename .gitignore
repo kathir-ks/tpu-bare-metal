@@ -36,6 +36,8 @@ cpp_jit_train
 cpp_gpt_module
 cpp_train_mlp
 cpp_train_gpt_frontend
+cpp_oracle_ops
+cpp_oracle_grad
 bench_gpt
 bench_matmul
 bench/data/
@@ -50,3 +52,7 @@ bench/results_*.json
 
 # Serialized executables (generated at runtime)
 *.exec
+
+# Python bytecode (oracle tooling)
+__pycache__/
+*.pyc

@@ -35,12 +35,13 @@ CXXFLAGS   = -std=c++17 -O2 -Wall -I./framework -I./cpp
 CPP_OBJ    = cpp/graph.o
 CPP_HDRS   = cpp/tpu.hpp cpp/graph.hpp cpp/nn.hpp cpp/gpt.hpp cpp/default_opts.h \
              cpp/proto_writer.hpp cpp/compile_opts.hpp cpp/debug_opts_blob.h \
-             cpp/tensor.hpp cpp/eager.hpp cpp/autograd.hpp cpp/jit.hpp cpp/module.hpp cpp/optim.hpp
+             cpp/tensor.hpp cpp/eager.hpp cpp/autograd.hpp cpp/jit.hpp cpp/module.hpp cpp/optim.hpp \
+             cpp/fixture.hpp
 
 cpp/graph.o: cpp/graph.cpp cpp/graph.hpp cpp/tpu.hpp cpp/default_opts.h
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-CPP_TESTS    = cpp_gradcheck cpp_train_tiny cpp_gpt_smoke cpp_dp cpp_ckpt cpp_compile_opts cpp_donation cpp_gather cpp_plugin_probe cpp_eager cpp_autograd cpp_jit cpp_module cpp_optim cpp_jit_train cpp_gpt_module
+CPP_TESTS    = cpp_gradcheck cpp_train_tiny cpp_gpt_smoke cpp_dp cpp_ckpt cpp_compile_opts cpp_donation cpp_gather cpp_plugin_probe cpp_eager cpp_autograd cpp_jit cpp_module cpp_optim cpp_jit_train cpp_gpt_module cpp_oracle_ops cpp_oracle_grad
 CPP_EXAMPLES = cpp_train_gpt cpp_train_gpt_dp cpp_train_mlp cpp_train_gpt_frontend
 
 cpp_gradcheck:  tests/cpp/test_gradcheck.cpp  $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
@@ -60,6 +61,15 @@ cpp_donation:   tests/cpp/test_donation.cpp     $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB
 cpp_gather:     tests/cpp/test_gather.cpp       $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 cpp_plugin_probe: tests/cpp/test_plugin_probe.cpp $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+OP_TABLE_HDRS = tests/cpp/op_table.hpp tests/cpp/op_table_base.hpp \
+                tests/cpp/op_table_unary.hpp tests/cpp/op_table_binary.hpp \
+                tests/cpp/op_table_reduction.hpp tests/cpp/op_table_matmul.hpp \
+                tests/cpp/op_table_shape.hpp tests/cpp/op_table_gather.hpp \
+                tests/cpp/op_table_misc.hpp
+cpp_oracle_ops: tests/cpp/test_oracle_ops.cpp $(OP_TABLE_HDRS) $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+cpp_oracle_grad: tests/cpp/test_oracle_grad.cpp $(OP_TABLE_HDRS) $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 cpp_eager:      tests/cpp/test_eager.cpp       $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
@@ -100,6 +110,22 @@ bench-cpp: bench_gpt
 bench-jax:
 	python3 bench/jax_baseline.py --steps 200 --batch-per-replica 8
 
+# ── Verification harness (capability: verification-harness) ─────────────────────
+# Regenerate golden vectors from the JAX oracle (offline tooling; needs the venv).
+# Runs from tests/oracle so `import fixture` / `tolerances` resolve.
+oracle:
+	cd tests/oracle && JAX_PLATFORMS=cpu python gen_ops.py
+
+# Strict acceptance gate: build + run the verification suites, exit non-zero on any
+# failure. On-device steps use a single TPU chip serially; check for an existing
+# /dev/accel* holder before running (CLAUDE.md) — this target does not preempt.
+VERIFY_BINS = cpp_oracle_ops cpp_oracle_grad
+verify: $(VERIFY_BINS)
+	@echo "── verification: oracle op forward parity ─────────────────────"
+	@./cpp_oracle_ops
+	@echo "── verification: oracle gradient parity ───────────────────────"
+	@./cpp_oracle_grad
+
 # ── HLO generation ─────────────────────────────────────────────────────────────
 hlo: gen_hlo.py
 	python3 gen_hlo.py
@@ -116,4 +142,4 @@ clean:
 	rm -f framework/*.o $(FWK_LIB)
 	rm -f cpp/*.o $(CPP_TESTS) $(CPP_EXAMPLES) cpp_eager
 
-.PHONY: all lib examples cpp hlo clean
+.PHONY: all lib examples cpp hlo oracle verify clean
