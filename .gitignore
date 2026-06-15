@@ -38,6 +38,7 @@ cpp_train_mlp
 cpp_train_gpt_frontend
 cpp_oracle_ops
 cpp_oracle_grad
+cpp_oracle_layers
 bench_gpt
 bench_matmul
 bench/data/

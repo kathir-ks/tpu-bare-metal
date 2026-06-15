@@ -41,7 +41,7 @@ CPP_HDRS   = cpp/tpu.hpp cpp/graph.hpp cpp/nn.hpp cpp/gpt.hpp cpp/default_opts.h
 cpp/graph.o: cpp/graph.cpp cpp/graph.hpp cpp/tpu.hpp cpp/default_opts.h
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
-CPP_TESTS    = cpp_gradcheck cpp_train_tiny cpp_gpt_smoke cpp_dp cpp_ckpt cpp_compile_opts cpp_donation cpp_gather cpp_plugin_probe cpp_eager cpp_autograd cpp_jit cpp_module cpp_optim cpp_jit_train cpp_gpt_module cpp_oracle_ops cpp_oracle_grad
+CPP_TESTS    = cpp_gradcheck cpp_train_tiny cpp_gpt_smoke cpp_dp cpp_ckpt cpp_compile_opts cpp_donation cpp_gather cpp_plugin_probe cpp_eager cpp_autograd cpp_jit cpp_module cpp_optim cpp_jit_train cpp_gpt_module cpp_oracle_ops cpp_oracle_grad cpp_oracle_layers
 CPP_EXAMPLES = cpp_train_gpt cpp_train_gpt_dp cpp_train_mlp cpp_train_gpt_frontend
 
 cpp_gradcheck:  tests/cpp/test_gradcheck.cpp  $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
@@ -70,6 +70,9 @@ OP_TABLE_HDRS = tests/cpp/op_table.hpp tests/cpp/op_table_base.hpp \
 cpp_oracle_ops: tests/cpp/test_oracle_ops.cpp $(OP_TABLE_HDRS) $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 cpp_oracle_grad: tests/cpp/test_oracle_grad.cpp $(OP_TABLE_HDRS) $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
+	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
+LAYER_TABLE_HDRS = $(wildcard tests/cpp/layer_table*.hpp)
+cpp_oracle_layers: tests/cpp/test_oracle_layers.cpp $(LAYER_TABLE_HDRS) $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
 cpp_eager:      tests/cpp/test_eager.cpp       $(CPP_OBJ) $(CPP_HDRS) $(FWK_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $< $(CPP_OBJ) -L./framework -ltpu_fw $(LDFLAGS)
@@ -115,16 +118,19 @@ bench-jax:
 # Runs from tests/oracle so `import fixture` / `tolerances` resolve.
 oracle:
 	cd tests/oracle && JAX_PLATFORMS=cpu python gen_ops.py
+	cd tests/oracle && JAX_PLATFORMS=cpu python gen_layers.py
 
 # Strict acceptance gate: build + run the verification suites, exit non-zero on any
 # failure. On-device steps use a single TPU chip serially; check for an existing
 # /dev/accel* holder before running (CLAUDE.md) — this target does not preempt.
-VERIFY_BINS = cpp_oracle_ops cpp_oracle_grad
+VERIFY_BINS = cpp_oracle_ops cpp_oracle_grad cpp_oracle_layers
 verify: $(VERIFY_BINS)
 	@echo "── verification: oracle op forward parity ─────────────────────"
 	@./cpp_oracle_ops
 	@echo "── verification: oracle gradient parity ───────────────────────"
 	@./cpp_oracle_grad
+	@echo "── verification: oracle layer parity ──────────────────────────"
+	@./cpp_oracle_layers
 
 # ── HLO generation ─────────────────────────────────────────────────────────────
 hlo: gen_hlo.py
