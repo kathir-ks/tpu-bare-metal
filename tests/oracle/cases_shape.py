@@ -51,4 +51,14 @@ CASES = {
     "reshape__2x130_to_260": dict(category="shape",
                                inputs=[f(randf("rs130", 0, 2, 130))],
                                fn=lambda a: jnp.reshape(a, (260,))),
+
+    # slice [4,4] -> [2,3] : rows 1:3, cols 0:3 (stride 1)
+    "slice__4x4_to_2x3": dict(category="shape",
+                               inputs=[f(randf("sl", 0, 4, 4))],
+                               fn=lambda a: a[1:3, 0:3]),
+
+    # pad [2,3] -> [4,5] : low=(1,0) high=(1,2), zeros
+    "pad__2x3_to_4x5": dict(category="shape",
+                               inputs=[f(randf("pd", 0, 2, 3))],
+                               fn=lambda a: jnp.pad(a, ((1, 1), (0, 2)))),
 }

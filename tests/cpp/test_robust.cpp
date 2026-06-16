@@ -87,6 +87,21 @@ int main() {
         auto ids = g.input("ids", {3}, DType::S32);
         CHECK_THROWS(g.gather_rows(s, ids), "rank", "gather_scalar_table_throws");
     }
+    {
+        Graph g;
+        auto a = g.input("a", {4, 4});
+        CHECK_THROWS(g.slice(a, {0, 0}, {5, 4}), "invalid", "slice_limit_oob_throws");
+    }
+    {
+        Graph g;
+        auto a = g.input("a", {4, 4});
+        CHECK_THROWS(g.slice(a, {0}, {2}), "rank", "slice_wrong_rank_throws");
+    }
+    {
+        Graph g;
+        auto a = g.input("a", {2, 3});
+        CHECK_THROWS(g.pad(a, {-1, 0}, {0, 0}), "negative", "pad_negative_throws");
+    }
 
     // Valid constructions must NOT throw (no false positives).
     {

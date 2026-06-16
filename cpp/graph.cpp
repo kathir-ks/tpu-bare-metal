@@ -139,6 +139,31 @@ std::string Graph::emit_node(int id, const std::string& ssa) const {
               << ", dims = [" << join_i64(n.ints) << "] : ("
               << T(n.inputs[0]) << ") -> " << self_t;
             break;
+        case Op::Slice: {
+            int64_t r = (int64_t)n.shape.size();
+            std::vector<int64_t> start(n.ints.begin(), n.ints.begin() + r);
+            std::vector<int64_t> limit(n.ints.begin() + r, n.ints.begin() + 2 * r);
+            std::vector<int64_t> strides(r, 1);
+            o << "  " << ssa << " = \"stablehlo.slice\"(" << NM(n.inputs[0]) << ") {"
+              << "start_indices = array<i64: " << join_i64(start) << ">, "
+              << "limit_indices = array<i64: " << join_i64(limit) << ">, "
+              << "strides = array<i64: " << join_i64(strides) << ">} : ("
+              << T(n.inputs[0]) << ") -> " << self_t;
+            break;
+        }
+        case Op::Pad: {
+            int64_t r = (int64_t)nodes_[n.inputs[0]].shape.size();
+            std::vector<int64_t> low(n.ints.begin(), n.ints.begin() + r);
+            std::vector<int64_t> high(n.ints.begin() + r, n.ints.begin() + 2 * r);
+            std::vector<int64_t> interior(r, 0);
+            o << "  " << ssa << " = \"stablehlo.pad\"(" << NM(n.inputs[0]) << ", "
+              << NM(n.inputs[1]) << ") {"
+              << "edge_padding_low = array<i64: " << join_i64(low) << ">, "
+              << "edge_padding_high = array<i64: " << join_i64(high) << ">, "
+              << "interior_padding = array<i64: " << join_i64(interior) << ">} : ("
+              << T(n.inputs[0]) << ", " << T(n.inputs[1]) << ") -> " << self_t;
+            break;
+        }
         case Op::Dot: {
             int64_t batch = n.ints[0];
             const Shape& A = nodes_[n.inputs[0]].shape;
@@ -374,6 +399,28 @@ std::vector<Value> Graph::grad(const Value& loss, const std::vector<Value>& para
             case Op::Reshape:
                 accum(n.inputs[0], reshape(G, node(n.inputs[0]).shape));
                 break;
+            case Op::Slice: {
+                // dual of pad: scatter G back into a zero tensor of the input shape.
+                Shape in = node(n.inputs[0]).shape;   // copy: pad() reallocates nodes_
+                int64_t r = (int64_t)in.size();
+                std::vector<int64_t> start(n.ints.begin(), n.ints.begin() + r);
+                std::vector<int64_t> limit(n.ints.begin() + r, n.ints.begin() + 2 * r);
+                std::vector<int64_t> low(r), high(r);
+                for (int64_t i = 0; i < r; i++) { low[i] = start[i]; high[i] = in[i] - limit[i]; }
+                accum(n.inputs[0], pad(G, low, high));
+                break;
+            }
+            case Op::Pad: {
+                // dual of slice: extract the operand region from G (interior 0 → stride 1).
+                Shape in = node(n.inputs[0]).shape;   // copy: slice() reallocates nodes_
+                int64_t r = (int64_t)in.size();
+                std::vector<int64_t> low(n.ints.begin(), n.ints.begin() + r);
+                std::vector<int64_t> start(r), limit(r);
+                for (int64_t i = 0; i < r; i++) { start[i] = low[i]; limit[i] = low[i] + in[i]; }
+                accum(n.inputs[0], slice(G, start, limit));
+                // n.inputs[1] is the constant 0 pad value → no gradient.
+                break;
+            }
             case Op::Broadcast: {
                 Shape os = node(n.inputs[0]).shape;  // copy: reduce_sum below
                                                      // reallocates nodes_

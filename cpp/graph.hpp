@@ -39,6 +39,7 @@ enum class Op {
     Neg, Exp, Log, Sqrt, Rsqrt, Tanh, Abs, Logistic,  // unary
     Dot,                                  // batched matmul
     Transpose, Reshape, Broadcast,        // shape ops
+    Slice, Pad,                           // sub-tensor extract / zero-pad (duals)
     ReduceSum, ReduceMax,                 // reductions (no keepdims)
     Select, Compare, Convert, Iota,       // misc
     Gather, ScatterAdd,                   // row lookup + its adjoint
@@ -240,6 +241,47 @@ class Graph {
         std::vector<int64_t> bd(r);
         for (int64_t i = 0; i < r; i++) bd[i] = R - r + i;  // trailing alignment
         return broadcast_in_dim(a, target, bd);
+    }
+
+    // slice(a, start, limit): extract a[start_i : limit_i] along each dim (stride 1).
+    // n.ints stores [start..., limit...]. VJP = pad with zeros (its dual).
+    Value slice(const Value& a, const std::vector<int64_t>& start,
+                const std::vector<int64_t>& limit) {
+        Shape in = node(a.id).shape;
+        DType dt = node(a.id).dtype;
+        int64_t r = (int64_t)in.size();
+        if ((int64_t)start.size() != r || (int64_t)limit.size() != r)
+            throw Error("slice: start/limit length must equal input rank " + std::to_string(r));
+        Shape s(r);
+        for (int64_t i = 0; i < r; i++) {
+            if (start[i] < 0 || limit[i] > in[i] || start[i] > limit[i])
+                throw Error("slice: invalid [start,limit] for dim " + std::to_string(i));
+            s[i] = limit[i] - start[i];
+        }
+        Node n; n.op = Op::Slice; n.shape = s; n.dtype = dt; n.inputs = {a.id};
+        n.ints = start; n.ints.insert(n.ints.end(), limit.begin(), limit.end());
+        return {this, add(n)};
+    }
+
+    // pad(a, low, high): zero-pad low_i before / high_i after each dim (interior 0).
+    // n.ints stores [low..., high...]; inputs {a, zero}. VJP = slice (its dual).
+    Value pad(const Value& a, const std::vector<int64_t>& low,
+              const std::vector<int64_t>& high) {
+        Shape in = node(a.id).shape;        // copy: scalar() below reallocates nodes_
+        DType dt = node(a.id).dtype;
+        int64_t r = (int64_t)in.size();
+        if ((int64_t)low.size() != r || (int64_t)high.size() != r)
+            throw Error("pad: low/high length must equal input rank " + std::to_string(r));
+        Shape s(r);
+        for (int64_t i = 0; i < r; i++) {
+            if (low[i] < 0 || high[i] < 0) throw Error("pad: negative padding");
+            s[i] = in[i] + low[i] + high[i];
+        }
+        Value zero = scalar(0.0, dt);
+        Node n; n.op = Op::Pad; n.shape = s; n.dtype = dt;
+        n.inputs = {a.id, zero.id};
+        n.ints = low; n.ints.insert(n.ints.end(), high.begin(), high.end());
+        return {this, add(n)};
     }
 
     // ── reductions (remove `axes`; use keepdims=true to keep them as size 1) ──

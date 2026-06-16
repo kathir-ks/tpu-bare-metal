@@ -31,6 +31,11 @@ inline void register_shape(OpBuilderMap& T) {
 
     // non-128-aligned: reshape [2,130] -> [260]
     T["reshape__2x130_to_260"]      = [](Graph& g, const std::vector<Value>& v){ return g.reshape(v[0], {260}); };
+
+    // slice [4,4] -> [2,3]  (rows 1:3, cols 0:3)
+    T["slice__4x4_to_2x3"]          = [](Graph& g, const std::vector<Value>& v){ return g.slice(v[0], {1, 0}, {3, 3}); };
+    // pad [2,3] -> [4,5]  (low=(1,0), high=(1,2))
+    T["pad__2x3_to_4x5"]            = [](Graph& g, const std::vector<Value>& v){ return g.pad(v[0], {1, 0}, {1, 2}); };
 }
 
 }  // namespace tpu
