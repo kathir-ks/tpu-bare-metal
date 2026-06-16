@@ -11,7 +11,9 @@ A **pure C/C++ ML stack on bare-metal TPU** — no Python, JAX, or TensorFlow at
 
 Tested on TPU v4-8 (4 chips, 2×2 topology), PJRT API v0.69, TFRT runtime.
 
-Docs: `docs/REPORT.md` (engineering report), `docs/ARCHITECTURE.md` (layer-by-layer), `docs/API.md` (C++ API), `docs/EAGER_JIT_FRONTEND.md` (eager/jit Tensor frontend design & development record), `docs/compile_options_format.md` (CompileOptionsProto wire format), `README_CPP.md`.
+Docs: `docs/REPORT.md` (engineering report), `docs/ARCHITECTURE.md` (layer-by-layer), `docs/API.md` (C++ API), `docs/EAGER_JIT_FRONTEND.md` (eager/jit Tensor frontend design & development record), `docs/VERIFICATION.md` (what the core is proven to do, and what isn't), `docs/compile_options_format.md` (CompileOptionsProto wire format), `README_CPP.md`.
+
+**Verification harness (`make verify`):** the core ops + nn layers + eager↔JIT equivalence are verified against an independent JAX oracle on-device — 399 checks across `cpp_oracle_ops`/`cpp_oracle_grad`/`cpp_oracle_layers`/`cpp_robust`/`cpp_equiv`/`cpp_fd_grad`. Run `make oracle` (JAX venv, offline CPU backend) to regenerate golden fixtures, then `make verify` (non-zero on any miss). This is the standing pre-merge gate for any change to `cpp/graph.*` or `cpp/nn.hpp`. Full details + tolerance policy + known gaps in `docs/VERIFICATION.md`.
 
 ## Goal / direction
 
