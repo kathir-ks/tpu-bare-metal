@@ -61,4 +61,13 @@ CASES = {
     "pad__2x3_to_4x5": dict(category="shape",
                                inputs=[f(randf("pd", 0, 2, 3))],
                                fn=lambda a: jnp.pad(a, ((1, 1), (0, 2)))),
+
+    # concat along axis 0: [2,3] + [2,3] -> [4,3]
+    "concat_ax0__2x3_2x3": dict(category="shape",
+                               inputs=[f(randf("cc0", 0, 2, 3)), f(randf("cc0", 1, 2, 3))],
+                               fn=lambda a, b: jnp.concatenate([a, b], axis=0)),
+    # concat along axis 1 with unequal sizes: [2,3] + [2,2] -> [2,5]
+    "concat_ax1__2x3_2x2": dict(category="shape",
+                               inputs=[f(randf("cc1", 0, 2, 3)), f(randf("cc1", 1, 2, 2))],
+                               fn=lambda a, b: jnp.concatenate([a, b], axis=1)),
 }

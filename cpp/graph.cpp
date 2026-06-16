@@ -164,6 +164,14 @@ std::string Graph::emit_node(int id, const std::string& ssa) const {
               << T(n.inputs[0]) << ", " << T(n.inputs[1]) << ") -> " << self_t;
             break;
         }
+        case Op::Concat: {
+            o << "  " << ssa << " = \"stablehlo.concatenate\"(";
+            for (size_t i = 0; i < n.inputs.size(); i++) { if (i) o << ", "; o << NM(n.inputs[i]); }
+            o << ") {dimension = " << n.ints[0] << " : i64} : (";
+            for (size_t i = 0; i < n.inputs.size(); i++) { if (i) o << ", "; o << T(n.inputs[i]); }
+            o << ") -> " << self_t;
+            break;
+        }
         case Op::Dot: {
             int64_t batch = n.ints[0];
             const Shape& A = nodes_[n.inputs[0]].shape;
@@ -419,6 +427,23 @@ std::vector<Value> Graph::grad(const Value& loss, const std::vector<Value>& para
                 for (int64_t i = 0; i < r; i++) { start[i] = low[i]; limit[i] = low[i] + in[i]; }
                 accum(n.inputs[0], slice(G, start, limit));
                 // n.inputs[1] is the constant 0 pad value → no gradient.
+                break;
+            }
+            case Op::Concat: {
+                // slice each operand's contiguous region out of the gradient along dim.
+                int64_t dim = n.ints[0];
+                Shape outs = n.shape;                 // copy
+                int64_t r = (int64_t)outs.size();
+                std::vector<int> ins(n.inputs);       // copy: slice() reallocates nodes_
+                std::vector<int64_t> sizes;
+                for (int iid : ins) sizes.push_back(node(iid).shape[dim]);
+                int64_t offset = 0;
+                for (size_t k = 0; k < ins.size(); k++) {
+                    std::vector<int64_t> start(r, 0), limit = outs;  // full extent off-dim
+                    start[dim] = offset; limit[dim] = offset + sizes[k];
+                    accum(ins[k], slice(G, start, limit));
+                    offset += sizes[k];
+                }
                 break;
             }
             case Op::Broadcast: {

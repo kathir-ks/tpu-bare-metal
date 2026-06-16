@@ -102,6 +102,12 @@ int main() {
         auto a = g.input("a", {2, 3});
         CHECK_THROWS(g.pad(a, {-1, 0}, {0, 0}), "negative", "pad_negative_throws");
     }
+    {
+        Graph g;
+        auto a = g.input("a", {2, 3});
+        auto b = g.input("b", {3, 3});           // mismatch off the concat dim (axis 1)
+        CHECK_THROWS(g.concat({a, b}, 1), "mismatch", "concat_shape_mismatch_throws");
+    }
 
     // Valid constructions must NOT throw (no false positives).
     {

@@ -36,6 +36,9 @@ inline void register_shape(OpBuilderMap& T) {
     T["slice__4x4_to_2x3"]          = [](Graph& g, const std::vector<Value>& v){ return g.slice(v[0], {1, 0}, {3, 3}); };
     // pad [2,3] -> [4,5]  (low=(1,0), high=(1,2))
     T["pad__2x3_to_4x5"]            = [](Graph& g, const std::vector<Value>& v){ return g.pad(v[0], {1, 0}, {1, 2}); };
+    // concat [2,3]+[2,3] -> [4,3] (axis 0) ; [2,3]+[2,2] -> [2,5] (axis 1)
+    T["concat_ax0__2x3_2x3"]        = [](Graph& g, const std::vector<Value>& v){ return g.concat({v[0], v[1]}, 0); };
+    T["concat_ax1__2x3_2x2"]        = [](Graph& g, const std::vector<Value>& v){ return g.concat({v[0], v[1]}, 1); };
 }
 
 }  // namespace tpu

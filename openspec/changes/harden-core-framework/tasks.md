@@ -54,7 +54,7 @@
 
 ## 8. Phase 2f — New ops (parallel worktrees, Opus; audit-driven, optional by budget)
 
-- [x] 8.1 Implement each prioritized new op as a closed unit: enum + builder + `emit_node()` + `grad()` VJP + gradcheck + oracle parity together — added Slice + Pad (mutually-dual VJPs: slice grad=pad, pad grad=slice), enum/builder/emit/VJP/oracle-case/robustness all together; forward exact, oracle+fd grads exact, 138/87/76 green, regression clean. (Compare/Select/Convert/Iota added earlier in the misc family.) Remaining candidates: Concat, Pow.
+- [x] 8.1 Implement each prioritized new op as a closed unit: enum + builder + `emit_node()` + `grad()` VJP + gradcheck + oracle parity together — added Slice + Pad (mutually-dual VJPs) AND Concat (VJP = slice each operand region from the gradient). All forward+grad exact on TPU, robustness covered, regression clean. (Compare/Select/Convert/Iota added earlier in misc.) Remaining candidate: Pow.
 - [~] 8.2 Wire each new op into eager + JIT + the equivalence matrix — Slice/Pad work through the Graph path (oracle suites); eager dispatch wiring still optional/TODO
 - [x] 8.3 Independent verifier — Slice/Pad gated by oracle-grad + finite-difference + robustness + full regression on-device
 

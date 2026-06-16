@@ -39,7 +39,7 @@ enum class Op {
     Neg, Exp, Log, Sqrt, Rsqrt, Tanh, Abs, Logistic,  // unary
     Dot,                                  // batched matmul
     Transpose, Reshape, Broadcast,        // shape ops
-    Slice, Pad,                           // sub-tensor extract / zero-pad (duals)
+    Slice, Pad, Concat,                   // sub-tensor extract / zero-pad / join
     ReduceSum, ReduceMax,                 // reductions (no keepdims)
     Select, Compare, Convert, Iota,       // misc
     Gather, ScatterAdd,                   // row lookup + its adjoint
@@ -281,6 +281,30 @@ class Graph {
         Node n; n.op = Op::Pad; n.shape = s; n.dtype = dt;
         n.inputs = {a.id, zero.id};
         n.ints = low; n.ints.insert(n.ints.end(), high.begin(), high.end());
+        return {this, add(n)};
+    }
+
+    // concat(parts, dim): join tensors along `dim` (all other dims must match).
+    // n.ints stores {dim}. VJP = slice each operand's region out of the gradient.
+    Value concat(const std::vector<Value>& parts, int64_t dim) {
+        if (parts.empty()) throw Error("concat: no operands");
+        Shape out = node(parts[0].id).shape;     // copy
+        DType dt  = node(parts[0].id).dtype;
+        int64_t r = (int64_t)out.size();
+        if (dim < 0) dim += r;
+        if (dim < 0 || dim >= r) throw Error("concat: dim out of range for rank " + std::to_string(r));
+        int64_t total = 0;
+        std::vector<int> ids;
+        for (const auto& p : parts) {
+            const Shape& s = node(p.id).shape;
+            if ((int64_t)s.size() != r) throw Error("concat: rank mismatch");
+            for (int64_t i = 0; i < r; i++)
+                if (i != dim && s[i] != out[i]) throw Error("concat: shape mismatch off dim " + std::to_string(i));
+            total += s[dim];
+            ids.push_back(p.id);
+        }
+        out[dim] = total;
+        Node n; n.op = Op::Concat; n.shape = out; n.dtype = dt; n.inputs = ids; n.ints = {dim};
         return {this, add(n)};
     }
 
