@@ -134,3 +134,8 @@ The `ex*` demos and `tpu_compute` need `.pb` files from `gen_hlo.py` (JAX venv: 
 - Planned changes live in `openspec/` (proposal/design/tasks/specs per change); use the `opsx:*` skills to propose/apply/archive.
 - Adding a new op to the graph: add the `Op` enum + builder in `graph.hpp`, emission in `emit_node()` and the VJP rule in `grad()` (`graph.cpp`), then extend `tests/cpp/test_gradcheck.cpp`.
 - Run the full regression suite (`make cpp` + the `cpp_*` binaries above) before declaring any graph/nn change done.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
